@@ -187,6 +187,11 @@ class ChurnPredictor:
         validation_issues = self.data_processor.validate_data(df)
         if validation_issues['missing_columns']:
             logger.warning(f"Missing columns: {validation_issues['missing_columns']}")
+            # Only proceed if missing columns are not critical for prediction
+            critical_columns = ['tenure', 'MonthlyCharges', 'TotalCharges', 'Contract']
+            missing_critical = [col for col in critical_columns if col in validation_issues['missing_columns']]
+            if missing_critical:
+                raise ValueError(f"Missing critical columns for prediction: {missing_critical}")
         
         # Make predictions
         try:

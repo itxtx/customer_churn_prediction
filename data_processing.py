@@ -67,9 +67,13 @@ class DataProcessor:
         """
         df = df.copy()
         
-        # Convert TotalCharges to numeric (handle empty strings)
+        # Convert TotalCharges to numeric (handle empty strings and spaces)
         if 'TotalCharges' in df.columns:
+            # First replace any empty strings or spaces with NaN
+            df['TotalCharges'] = df['TotalCharges'].replace(['', ' '], np.nan)
+            # Then convert to numeric
             df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+
             logger.info(f"Converted TotalCharges to numeric. Found {df['TotalCharges'].isna().sum()} missing values")
         
         # Convert SeniorCitizen to string for consistency
@@ -92,6 +96,11 @@ class DataProcessor:
         
         # Monthly to Total Charges Ratio
         if 'MonthlyCharges' in df.columns and 'TotalCharges' in df.columns:
+            # Ensure both columns are numeric
+            df['MonthlyCharges'] = pd.to_numeric(df['MonthlyCharges'], errors='coerce')
+            df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+            
+            # Calculate ratio with proper handling of zeros and NaN
             df['MonthlyToTotalRatio'] = df['MonthlyCharges'] / (df['TotalCharges'] + 1)
             df['MonthlyToTotalRatio'] = df['MonthlyToTotalRatio'].fillna(0)
             logger.info("Created MonthlyToTotalRatio feature")
