@@ -7,12 +7,46 @@ from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 import yaml
-
+from sklearn.base import BaseEstimator, TransformerMixin
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class FeatureEngineer(BaseEstimator, TransformerMixin):
+    """
+    Custom transformer for feature engineering.
+    """
+    def __init__(self):
+        pass
 
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X, y=None):
+        X = X.copy()
+        # Monthly to Total Charges Ratio
+        if 'MonthlyCharges' in X.columns and 'TotalCharges' in X.columns:
+            epsilon = 1e-6
+            X['MonthlyToTotalRatio'] = X['MonthlyCharges'] / (X['TotalCharges'] + epsilon)
+            X.loc[X['tenure'] == 0, 'MonthlyToTotalRatio'] = 1
+            X['MonthlyToTotalRatio'] = X['MonthlyToTotalRatio'].fillna(0)
+            X['MonthlyToTotalRatio'] = X['MonthlyToTotalRatio'].clip(upper=1)
+
+        # Number of Additional Services
+        service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
+                           'TechSupport', 'StreamingTV', 'StreamingMovies']
+        existing_services = [col for col in service_columns if col in X.columns]
+
+        if existing_services:
+            X['NumAdditionalServices'] = (X[existing_services] == 'Yes').sum(axis=1)
+
+        # Has Internet Service (binary)
+        if 'InternetService' in X.columns:
+            X['HasInternetService'] = (X['InternetService'] != 'No').astype(int)
+
+        return X
+    
+    
 class DataProcessor:
     """Handles all data preprocessing and feature engineering operations."""
 
