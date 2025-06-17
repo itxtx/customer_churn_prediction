@@ -203,16 +203,17 @@ class ModelTrainer:
         return param_grid_list
 
     def tune_hyperparameters(self, pipeline: ImbPipeline, X_train: pd.DataFrame, y_train: pd.Series,
-                           model_name: str, tuning_strategy: str = 'random') -> Pipeline:
+                        model_name: str, tuning_strategy: str = 'random') -> Pipeline:
         """
-        Perform hyperparameter tuning using RandomizedSearchCV or BayesSearchCV.
+        Perform hyperparameter tuning using RandomizedSearchCV, BayesSearchCV, or a hybrid approach.
         
         Args:
             pipeline: Base model pipeline (with preprocessor and resampler placeholder)
             X_train: Training features
             y_train: Training target
             model_name: Name of the model
-            tuning_strategy: 'random' for RandomizedSearchCV, 'bayes' for BayesSearchCV
+            tuning_strategy: 'random' for RandomizedSearchCV, 'bayes' for BayesSearchCV, 
+                            'hybrid' for Random->Bayes sequential search
             
         Returns:
             Best tuned pipeline
@@ -220,11 +221,59 @@ class ModelTrainer:
         param_distributions = self.get_param_distributions(model_name, y_train)
         random_state = self.config['data']['random_state']
         cv_strategy = StratifiedKFold(n_splits=self.config['training']['cv_folds'],
-                                      shuffle=True, random_state=random_state)
+                                    shuffle=True, random_state=random_state)
         scoring_metric = self.config['training']['scoring_metric']
         n_iter_search = self.config['training']['n_iter_search']
         
-        if tuning_strategy == 'random':
+        if tuning_strategy == 'hybrid':
+            logger.info(f"Starting Hybrid tuning for {model_name}...")
+            
+            # Step 1: Broad exploration with RandomizedSearchCV
+            logger.info("Step 1: Broad exploration with RandomizedSearchCV...")
+            random_search = RandomizedSearchCV(
+                pipeline,
+                param_distributions=param_distributions,
+                n_iter=n_iter_search,
+                cv=cv_strategy,
+                scoring=scoring_metric,
+                refit=True,
+                n_jobs=-1,
+                random_state=random_state,
+                verbose=1
+            )
+            random_search.fit(X_train, y_train)
+            
+            best_random_params = random_search.best_params_
+            best_random_score = random_search.best_score_
+            logger.info(f"Random search best params: {best_random_params}")
+            logger.info(f"Random search best score: {best_random_score:.4f}")
+            
+            # Step 2: Create refined search space around best parameters
+            logger.info("Step 2: Creating refined search space for BayesSearchCV...")
+            refined_search_space = self._create_refined_search_space(best_random_params, model_name)
+            
+            # Step 3: Focused exploitation with BayesSearchCV
+            logger.info("Step 3: Focused exploitation with BayesSearchCV...")
+            bayes_search = BayesSearchCV(
+                estimator=pipeline,
+                search_spaces=refined_search_space,
+                n_iter=max(n_iter_search // 2, 10),  # Use half iterations for focused search
+                cv=cv_strategy,
+                scoring=scoring_metric,
+                n_jobs=-1,
+                refit=True,
+                random_state=random_state,
+                verbose=1
+            )
+            bayes_search.fit(X_train, y_train)
+            
+            logger.info(f"Bayes search best params: {bayes_search.best_params_}")
+            logger.info(f"Bayes search best score: {bayes_search.best_score_:.4f}")
+            logger.info(f"Improvement over random search: {bayes_search.best_score_ - best_random_score:.4f}")
+            
+            return bayes_search.best_estimator_
+        
+        elif tuning_strategy == 'random':
             tuner = RandomizedSearchCV(
                 pipeline,
                 param_distributions=param_distributions,
@@ -237,46 +286,11 @@ class ModelTrainer:
                 verbose=1
             )
             logger.info(f"Starting RandomizedSearchCV for {model_name} (n_iter={n_iter_search})...")
+        
         elif tuning_strategy == 'bayes':
-            # For BayesSearchCV, we need a single search_space dictionary (not a list of dicts)
-            # and potentially define Real/Integer/Categorical types.
-            # This simplified logic will take the first dictionary from param_distributions.
-            # For a more robust BayesSearchCV, one might manually craft the search_spaces
-            # using skopt's Real, Integer, Categorical.
+            # Convert param distributions to Bayes search space
+            bayes_search_space = self._convert_to_bayes_space(param_distributions[0], model_name)
             
-            # Convert the list of dicts from param_distributions into a skopt search_space dict
-            # This is a basic conversion, complex nested lists for params would need more logic.
-            # For this context, we will assume params are either simple lists or single values.
-            # BayesSearchCV doesn't handle param_distributions as a list of dicts directly like RandomizedSearchCV
-            # So, we consolidate if multiple resampler options were given.
-            
-            bayes_search_space = {}
-            for param_dict in param_distributions:
-                for key, value in param_dict.items():
-                    if key not in bayes_search_space:
-                        if isinstance(value, list) and len(value) > 1:
-                            if "n_estimators" in key or "max_depth" in key or "k_neighbors" in key or "min_samples" in key:
-                                bayes_search_space[key] = Integer(min(value), max(value), prior='uniform')
-                            elif "learning_rate" in key or "subsample" in key or "colsample_bytree" in key or "gamma" in key or "reg_alpha" in key or "reg_lambda" in key:
-                                bayes_search_space[key] = Real(min(value), max(value), prior='uniform')
-                                # Use log-uniform for learning_rate as it's common
-                                if "learning_rate" in key:
-                                    bayes_search_space[key] = Real(min(value), max(value), prior='log-uniform')
-                            else:
-                                bayes_search_space[key] = Categorical(value)
-                        elif isinstance(value, list) and len(value) == 1:
-                            bayes_search_space[key] = Categorical(value) # Single value list
-                        else: # Already a single value
-                            bayes_search_space[key] = Categorical([value])
-
-            # Special case for 'resampler': BayesSearchCV expects an instance, not a list of instances or None
-            # If multiple resamplers are desired, BayesSearchCV would need to be run separately for each.
-            # For simplicity, we'll try to use the most common one (SMOTE) if 'bayes' is selected.
-            if 'resampler' in bayes_search_space:
-                # Assuming SMOTE is the preferred resampler for BayesSearchCV if applicable
-                smote_instance = SMOTE(random_state=random_state)
-                bayes_search_space['resampler'] = Categorical([smote_instance])
-
             tuner = BayesSearchCV(
                 estimator=pipeline,
                 search_spaces=bayes_search_space,
@@ -284,20 +298,147 @@ class ModelTrainer:
                 cv=cv_strategy,
                 scoring=scoring_metric,
                 n_jobs=-1,
-                refit=True, # Always refit the best model
+                refit=True,
                 random_state=random_state,
                 verbose=1
             )
             logger.info(f"Starting BayesSearchCV for {model_name} (n_iter={n_iter_search})...")
+        
         else:
             raise ValueError(f"Unknown tuning strategy: {tuning_strategy}")
 
-        tuner.fit(X_train, y_train)
+        if tuning_strategy != 'hybrid':
+            tuner.fit(X_train, y_train)
+            logger.info(f"Best parameters for {model_name}: {tuner.best_params_}")
+            logger.info(f"Best CV score: {tuner.best_score_:.4f}")
+            return tuner.best_estimator_
+
+    def _create_refined_search_space(self, best_params: Dict[str, Any], model_name: str) -> Dict[str, Any]:
+        """
+        Create a refined search space for BayesSearchCV based on RandomizedSearchCV results.
         
-        logger.info(f"Best parameters for {model_name}: {tuner.best_params_}")
-        logger.info(f"Best CV score: {tuner.best_score_:.4f}")
+        Args:
+            best_params: Best parameters from RandomizedSearchCV
+            model_name: Name of the model
+            
+        Returns:
+            Refined search space for BayesSearchCV
+        """
+        refined_space = {}
         
-        return tuner.best_estimator_
+        # Handle resampler - keep the best one found
+        if 'resampler' in best_params:
+            refined_space['resampler'] = Categorical([best_params['resampler']])
+        
+        # Define refinement ranges for different parameter types
+        for param, value in best_params.items():
+            if param == 'resampler':
+                continue
+                
+            # Classifier parameters
+            if param.startswith('classifier__'):
+                param_name = param.replace('classifier__', '')
+                
+                # Integer parameters
+                if param_name in ['n_estimators', 'max_depth', 'min_samples_split', 'min_samples_leaf']:
+                    if value is None:  # Handle None for max_depth
+                        refined_space[param] = Categorical([None, 20, 30, 40])
+                    else:
+                        # Create range around best value (±20%)
+                        lower = max(1, int(value * 0.8))
+                        upper = max(lower + 1, int(value * 1.2))  # Ensure upper is at least lower + 1
+                        refined_space[param] = Integer(lower, upper)
+                
+                # Float parameters
+                elif param_name in ['learning_rate', 'subsample', 'colsample_bytree']:
+                    # Create range around best value (±30%)
+                    lower = max(0.001, value * 0.7)
+                    upper = min(1.0, value * 1.3)
+                    if param_name == 'learning_rate':
+                        refined_space[param] = Real(lower, upper, prior='log-uniform')
+                    else:
+                        refined_space[param] = Real(lower, upper, prior='uniform')
+                
+                # Regularization parameters
+                elif param_name in ['C', 'gamma', 'reg_alpha', 'reg_lambda']:
+                    # Wider range for regularization parameters
+                    if value == 0:
+                        refined_space[param] = Real(0, 0.1, prior='uniform')
+                    else:
+                        lower = value * 0.1
+                        upper = value * 10
+                        refined_space[param] = Real(lower, upper, prior='log-uniform')
+                
+                # Categorical parameters
+                elif param_name in ['penalty', 'solver', 'max_features', 'bootstrap', 'class_weight']:
+                    refined_space[param] = Categorical([value])
+                
+                # Scale pos weight for XGBoost
+                elif param_name == 'scale_pos_weight':
+                    if value == 1:
+                        refined_space[param] = Categorical([1])
+                    else:
+                        lower = max(1, value * 0.8)
+                        upper = value * 1.2
+                        refined_space[param] = Real(lower, upper, prior='uniform')
+            
+            # Resampler parameters
+            elif param.startswith('resampler__'):
+                param_name = param.replace('resampler__', '')
+                if param_name == 'k_neighbors':
+                    # Narrow range around best k
+                    lower = max(1, value - 2)
+                    upper = value + 2
+                    refined_space[param] = Integer(lower, upper)
+                elif param_name == 'sampling_strategy':
+                    # Small range around best sampling strategy
+                    lower = max(0.5, value - 0.1)
+                    upper = min(1.0, value + 0.1)
+                    refined_space[param] = Real(lower, upper, prior='uniform')
+        
+        logger.info(f"Refined search space created with {len(refined_space)} parameters")
+        return refined_space
+
+    def _convert_to_bayes_space(self, param_dict: Dict[str, Any], model_name: str) -> Dict[str, Any]:
+        """
+        Convert parameter distributions to BayesSearchCV format.
+        
+        Args:
+            param_dict: Parameter distribution dictionary
+            model_name: Name of the model
+            
+        Returns:
+            Search space for BayesSearchCV
+        """
+        bayes_space = {}
+        
+        for key, values in param_dict.items():
+            if not isinstance(values, list):
+                values = [values]
+            
+            if len(values) == 1:
+                bayes_space[key] = Categorical(values)
+            elif key == 'resampler':
+                # Special handling for resampler objects
+                bayes_space[key] = Categorical(values)
+            elif any(substring in key for substring in ['n_estimators', 'max_depth', 'min_samples', 'k_neighbors']):
+                if None in values:
+                    bayes_space[key] = Categorical(values)
+                else:
+                    min_val = min(v for v in values if v is not None)
+                    max_val = max(v for v in values if v is not None)
+                    if min_val == max_val:
+                        max_val = min_val + 1  # Ensure we have a valid range
+                    bayes_space[key] = Integer(min_val, max_val)
+            elif any(substring in key for substring in ['learning_rate', 'subsample', 'colsample_bytree', 
+                                                    'gamma', 'reg_alpha', 'reg_lambda', 'C']):
+                bayes_space[key] = Real(min(values), max(values), 
+                                    prior='log-uniform' if 'learning_rate' in key or 'C' in key else 'uniform')
+            else:
+                bayes_space[key] = Categorical(values)
+        
+        return bayes_space
+        
     
     def evaluate_model(self, pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series,
                       model_name: str) -> Dict[str, Any]:

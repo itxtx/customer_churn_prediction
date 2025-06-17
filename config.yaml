@@ -70,6 +70,8 @@ training:
   cv_folds: 5
   scoring_metric: "f1"
   n_iter_search: 20
+  tuning_strategy: "hybrid"  
+
   
 # Logging Configuration
 logging:

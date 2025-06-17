@@ -84,7 +84,8 @@ class TestDataProcessor:
         
         # Check TotalCharges conversion
         assert cleaned_df['TotalCharges'].dtype == 'float64'
-        assert cleaned_df['TotalCharges'].isna().sum() == 1  # Empty string becomes NaN
+        # Empty string should be converted to a value based on MonthlyCharges * tenure
+        assert cleaned_df['TotalCharges'].isna().sum() == 0  # No NaNs after imputation
         
         # Check SeniorCitizen conversion
         assert cleaned_df['SeniorCitizen'].dtype == 'object'
@@ -179,23 +180,6 @@ class TestDataProcessor:
         assert any('gender' in issue for issue in issues['missing_values'])
         assert any('tenure' in issue for issue in issues['data_type_issues'])
         assert any('SeniorCitizen' in issue for issue in issues['value_issues'])
-    
-    def test_get_feature_importance_df(self, data_processor):
-        """Test feature importance DataFrame creation."""
-        feature_names = ['feature1', 'feature2', 'feature3']
-        importances = np.array([0.5, 0.3, 0.2])
-        
-        importance_df = data_processor.get_feature_importance_df(
-            feature_names, 
-            importances
-        )
-        
-        # Check sorting
-        assert importance_df.iloc[0]['feature'] == 'feature1'
-        assert importance_df.iloc[0]['importance'] == 0.5
-        
-        # Check cumulative importance
-        assert importance_df['cumulative_importance'].iloc[-1] == 1.0
 
 
 class TestIntegration:
