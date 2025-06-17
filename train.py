@@ -299,6 +299,14 @@ class ModelTrainer:
         
         return tuner.best_estimator_
     
+    def tune_hyperparameters_hybrid(self, pipeline: ImbPipeline, X_train: pd.DataFrame, y_train: pd.Series,
+                                   model_name: str) -> Pipeline:
+        """
+        Perform hybrid hyperparameter tuning using RandomizedSearchCV and BayesSearchCV.
+        """
+
+        
+    
     def evaluate_model(self, pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series,
                       model_name: str) -> Dict[str, Any]:
         """
