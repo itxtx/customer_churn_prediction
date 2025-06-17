@@ -114,12 +114,10 @@ class ModelTrainer:
         else:
             raise ValueError(f"Unknown model name: {model_name}")
         
-        # Use ImbPipeline to correctly integrate resampling
-        # 'resampler' step will be updated during hyperparameter tuning
         pipeline = ImbPipeline([
-            ('feature_engineer', FeatureEngineer()),
+            ('engineer', FeatureEngineer()), # <-- Feature engineering is now the first step
             ('preprocessor', preprocessor),
-            ('resampler', None), # Placeholder for resampling
+            ('resampler', None),  # Placeholder for resampling
             ('classifier', classifier)
         ])
         
@@ -129,18 +127,13 @@ class ModelTrainer:
     def get_param_distributions(self, model_name: str, y_train: Optional[pd.Series] = None) -> List[Dict[str, Any]]:
         """
         Get hyperparameter distributions and resampling options for tuning.
-        Args:
-            model_name: Name of the model
-            y_train: Training target series, used for scale_pos_weight calculation.
-        Returns:
-            List of dictionaries for parameter distributions for RandomizedSearchCV/BayesSearchCV.
         """
-        # Common resampling options and their potential parameters
         resampling_options = [
-            (None, {}), # No resampling
+            (None, {}),  # No resampling
             (SMOTE(random_state=self.config['data']['random_state']), {'resampler__k_neighbors': [3, 5, 7]}),
-            (RandomUnderSampler(random_state=self.config['data']['random_state']), {'resampler__sampling_strategy': [0.3, 0.5, 0.7]}),
-            (RandomOverSampler(random_state=self.config['data']['random_state']), {'resampler__sampling_strategy': [0.5, 0.7, 1.0]}),
+            # FIX: Ensure sampling_strategy is a float < 1.0 for RandomUnderSampler
+            (RandomUnderSampler(random_state=self.config['data']['random_state'], sampling_strategy=0.5), {}),
+            (RandomOverSampler(random_state=self.config['data']['random_state']), {'resampler__sampling_strategy': [0.7, 1.0]}),
         ]
         
         classifier_param_ranges = {}
@@ -440,13 +433,13 @@ class ModelTrainer:
                 'test_results': test_results
             }
             
+            self.save_model(tuned_pipeline, f"best_model_{model_name}.pkl") 
             # Track best model based on recall for churn class
             if test_results['recall_churn'] > self.best_score:
                 self.best_score = test_results['recall_churn']
                 self.best_model = model_name
                 
-                # Save best model
-                self.save_model(tuned_pipeline, f"best_model_{model_name}.pkl")
+
                 
         logger.info(f"\n{'='*50}")
         logger.info(f"Training Complete. Best model: {self.best_model} with recall={self.best_score:.4f}")
@@ -543,10 +536,14 @@ class ModelTrainer:
         if hasattr(classifier, 'feature_importances_'):
             importances = classifier.feature_importances_
             
-            # Create DataFrame
-            importance_df = self.data_processor.get_feature_importance_df(
-                feature_names, importances
-            )
+            # Create DataFrame directly
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importances
+            })
+            
+            importance_df = importance_df.sort_values('importance', ascending=False)
+            importance_df['cumulative_importance'] = importance_df['importance'].cumsum()
             
             return importance_df
         elif hasattr(classifier, 'coef_'): # For linear models like LogisticRegression

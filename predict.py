@@ -79,7 +79,7 @@ class ChurnPredictor:
         df = self.data_processor.clean_data(df)
         
         # Add engineered features
-        df = self.data_processor.calculate_derived_features(df)
+        #df = self.data_processor.calculate_derived_features(df)
         
         # Remove customerID if present
         if self.data_processor.customer_id_column in df.columns:
