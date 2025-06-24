@@ -3,10 +3,10 @@ import logging
 import yaml
 from typing import Dict, Any
 
-from database import Database
-from data_processing import DataProcessor
-from train import ModelTrainer
-from predict import ChurnPredictor
+from src.database import Database
+from src.data_processing import DataProcessor
+from src.train import ModelTrainer
+from src.predict import ChurnPredictor
 
 # Set up logging
 logging.basicConfig(

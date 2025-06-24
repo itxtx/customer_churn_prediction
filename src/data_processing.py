@@ -12,39 +12,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class FeatureEngineer(BaseEstimator, TransformerMixin):
-    """
-    Custom transformer for feature engineering.
-    """
-    def __init__(self):
-        pass
 
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X, y=None):
-        X = X.copy()
-        # Monthly to Total Charges Ratio
-        if 'MonthlyCharges' in X.columns and 'TotalCharges' in X.columns:
-            epsilon = 1e-6
-            X['MonthlyToTotalRatio'] = X['MonthlyCharges'] / (X['TotalCharges'] + epsilon)
-            X.loc[X['tenure'] == 0, 'MonthlyToTotalRatio'] = 1
-            X['MonthlyToTotalRatio'] = X['MonthlyToTotalRatio'].fillna(0)
-            X['MonthlyToTotalRatio'] = X['MonthlyToTotalRatio'].clip(upper=1)
-
-        # Number of Additional Services
-        service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
-                           'TechSupport', 'StreamingTV', 'StreamingMovies']
-        existing_services = [col for col in service_columns if col in X.columns]
-
-        if existing_services:
-            X['NumAdditionalServices'] = (X[existing_services] == 'Yes').sum(axis=1)
-
-        # Has Internet Service (binary)
-        if 'InternetService' in X.columns:
-            X['HasInternetService'] = (X['InternetService'] != 'No').astype(int)
-
-        return X
     
     
 class DataProcessor:
@@ -131,57 +99,57 @@ class DataProcessor:
         return df
 
     def calculate_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Create engineered features based on existing columns.
-        This version ensures that TotalCharges is already cleaned and imputed.
+            """
+            Create engineered features and drop the original source columns.
+            """
+            df = df.copy()
 
-        Args:
-            df: Input DataFrame
+            # Monthly to Total Charges Ratio (logic is fine, no changes needed here)
+            if 'MonthlyCharges' in df.columns and 'TotalCharges' in df.columns:
+                epsilon = 1e-6 
+                df['MonthlyToTotalRatio'] = df['MonthlyCharges'] / (df['TotalCharges'] + epsilon)
+                df.loc[df['tenure'] == 0, 'MonthlyToTotalRatio'] = 1 
+                df['MonthlyToTotalRatio'] = df['MonthlyToTotalRatio'].fillna(0)
+                df['MonthlyToTotalRatio'] = df['MonthlyToTotalRatio'].clip(upper=1)
+                logger.info("Created MonthlyToTotalRatio feature")
 
-        Returns:
-            DataFrame with additional engineered features
-        """
-        df = df.copy()
+            # Number of Additional Services
+            service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
+                            'TechSupport', 'StreamingTV', 'StreamingMovies']
+            existing_services = [col for col in service_columns if col in df.columns]
+            if existing_services:
+                df['NumAdditionalServices'] = (df[existing_services] == 'Yes').sum(axis=1)
+                logger.info("Created NumAdditionalServices feature")
+                # ----> ADD THIS LINE TO DROP THE SOURCE COLUMNS <----
+                df = df.drop(columns=existing_services)
+                logger.info(f"Dropped original service columns: {existing_services}")
 
-        # Monthly to Total Charges Ratio
-        if 'MonthlyCharges' in df.columns and 'TotalCharges' in df.columns:
-            # MonthlyCharges should already be numeric, but ensure consistency
-            df['MonthlyCharges'] = pd.to_numeric(df['MonthlyCharges'], errors='coerce')
+            # Has Internet Service (binary)
+            if 'InternetService' in df.columns:
+                df['HasInternetService'] = (df['InternetService'] != 'No').astype(int)
+                logger.info("Created HasInternetService feature")
+                # ----> ADD THIS LINE TO DROP THE SOURCE COLUMN <----
+                df = df.drop(columns=['InternetService'])
+                logger.info("Dropped original InternetService column")
+                
+            numerical_features = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
             
-            # TotalCharges should already be numeric and imputed from clean_data,
-            # but we add a small epsilon to avoid division by zero for the ratio.
-            epsilon = 1e-6 
-            df['MonthlyToTotalRatio'] = df['MonthlyCharges'] / (df['TotalCharges'] + epsilon)
-            
-            # Special handling for tenure=0 or cases where ratio might become infinite/large if TotalCharges is very small.
-            # If TotalCharges is very close to zero but MonthlyCharges is significant, the ratio can be very high.
-            # Capping this can prevent issues.
-            # Also, for tenure=0, TotalCharges is 0, so MonthlyToTotalRatio might be inf/NaN. Setting it to 1 is a common convention.
-            df.loc[df['tenure'] == 0, 'MonthlyToTotalRatio'] = 1 
-            
-            # Handle potential NaNs in MonthlyCharges or the ratio itself if division results in NaN
-            df['MonthlyToTotalRatio'] = df['MonthlyToTotalRatio'].fillna(0) # Fill any remaining NaNs after calculation
-            
-            # Cap outliers for the ratio if it becomes extremely large (e.g. TotalCharges + epsilon is still ~0)
-            df['MonthlyToTotalRatio'] = df['MonthlyToTotalRatio'].clip(upper=1) # Ratio should not exceed 1 generally.
-            
-            logger.info("Created MonthlyToTotalRatio feature")
+            if 'SeniorCitizen' in numerical_features:
+                numerical_features.remove('SeniorCitizen') # Remove if present
 
-        # Number of Additional Services
-        service_columns = ['OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
-                           'TechSupport', 'StreamingTV', 'StreamingMovies']
-        existing_services = [col for col in service_columns if col in df.columns]
+            categorical_features = df.select_dtypes(include=['object']).columns.tolist()
+            # Add 'SeniorCitizen' to categorical features
+            categorical_features.append('SeniorCitizen')
 
-        if existing_services:
-            df['NumAdditionalServices'] = (df[existing_services] == 'Yes').sum(axis=1)
-            logger.info("Created NumAdditionalServices feature")
+            # Include newly engineered features if they are numeric
+            engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+            for feat in engineered_numeric:
+                if feat in df.columns and feat not in numerical_features:
+                    # Check if it's actually numeric in the DataFrame
+                    if pd.api.types.is_numeric_dtype(df[feat]):
+                        numerical_features.append(feat)
 
-        # Has Internet Service (binary)
-        if 'InternetService' in df.columns:
-            df['HasInternetService'] = (df['InternetService'] != 'No').astype(int)
-            logger.info("Created HasInternetService feature")
-
-        return df
+            return df
 
     def cap_outliers(self, df: pd.DataFrame, columns: List[str],
                      lower_percentile: float = 0.01,
@@ -247,25 +215,57 @@ class DataProcessor:
             X = df.drop(columns=[self.target_column])
             y = df[self.target_column]
 
-            # Convert target to binary
-            if y.dtype == 'object':
-                y = (y == 'Yes').astype(int)
         else:
-            X = df
-            y = None
+            raise ValueError(f"Target column {self.target_column} not found in dataframe")
 
         return X, y
 
-    def create_preprocessing_pipeline(self) -> ColumnTransformer:
+    def create_preprocessing_pipeline(self, X_train: pd.DataFrame = None) -> ColumnTransformer:
         """
         Create a preprocessing pipeline for numeric and categorical features.
+
+        Args:
+            X_train: Training data to dynamically detect feature types (optional)
 
         Returns:
             ColumnTransformer object with preprocessing steps
         """
-        # Update feature lists to include engineered features
-        numeric_features = self.numeric_features + ['MonthlyToTotalRatio', 'NumAdditionalServices']
-        categorical_features = self.categorical_features + ['HasInternetService'] # HasInternetService is binary (0/1), but was created from a categorical, so it's safer to treat it as categorical for OneHotEncoder if it might have been other values, or numeric for StandardScaler if strictly 0/1. Given its nature, it might be better handled as numeric if it's always 0/1, or ensure it is correctly encoded. For now, keeping it here to ensure it passes through the correct transformer.
+        # Initialize feature lists
+        numeric_features = []
+        categorical_features = []
+        
+        if X_train is not None:
+            # Dynamic feature detection like in parameter search notebook
+            numeric_features = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
+            if 'SeniorCitizen' in numeric_features:
+                numeric_features.remove('SeniorCitizen') # Remove if present
+
+            categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
+            # Add 'SeniorCitizen' to categorical features
+            categorical_features.append('SeniorCitizen')
+
+            # Include newly engineered features if they are numeric
+            engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+            for feat in engineered_numeric:
+                if feat in X_train.columns and feat not in numeric_features:
+                     # Check if it's actually numeric in the DataFrame
+                     if pd.api.types.is_numeric_dtype(X_train[feat]):
+                          numeric_features.append(feat)
+        else:
+            # Fallback to config-based feature lists
+            engineered_features = self.config['features'].get('engineered_features', [])
+            numeric_features = self.numeric_features.copy()
+            categorical_features = self.categorical_features.copy()
+            
+            if 'SeniorCitizen' in numeric_features:
+                numeric_features.remove('SeniorCitizen')
+            if 'SeniorCitizen' not in categorical_features:
+                categorical_features.append('SeniorCitizen')
+            
+            engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+            for feat in engineered_numeric:
+                if feat in engineered_features and feat not in numeric_features:
+                    numeric_features.append(feat)
 
         # Numeric preprocessing
         numeric_transformer = Pipeline(steps=[
