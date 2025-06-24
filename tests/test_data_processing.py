@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import tempfile
 import os
 
-from data_processing import DataProcessor
+from src.data_processing import DataProcessor
 
 
 @pytest.fixture

@@ -6,8 +6,8 @@ import logging
 import yaml
 from datetime import datetime
 import uvicorn
-from predict import ChurnPredictor
-from database import Database
+from src.predict import ChurnPredictor
+from src.database import Database
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

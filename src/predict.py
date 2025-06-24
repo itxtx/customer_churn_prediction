@@ -6,7 +6,7 @@ import yaml
 import joblib
 import os
 
-from data_processing import DataProcessor
+from src.data_processing import DataProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

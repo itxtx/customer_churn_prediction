@@ -25,8 +25,8 @@ from xgboost import XGBClassifier
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
 
-from data_processing import DataProcessor
-from data_processing import FeatureEngineer
+from src.data_processing import DataProcessor
+from src.data_processing import FeatureEngineer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -529,6 +529,9 @@ class ModelTrainer:
         
         return cv_scores
     
+
+        
+        
     def train_all_models(self, X_train: pd.DataFrame, X_test: pd.DataFrame,
                         y_train: pd.Series, y_test: pd.Series) -> Dict[str, Dict]:
         """
