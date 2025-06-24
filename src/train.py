@@ -105,7 +105,6 @@ class ModelTrainer:
                 random_state=self.config['data']['random_state'],
                 objective='binary:logistic',
                 eval_metric='logloss',
-                use_label_encoder=False,
                 n_jobs=-1  
             )
         else:
