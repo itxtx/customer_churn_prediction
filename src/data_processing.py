@@ -256,26 +256,52 @@ class DataProcessor:
 
         return X, y
 
-    def create_preprocessing_pipeline(self) -> ColumnTransformer:
+    def create_preprocessing_pipeline(self, X_train: pd.DataFrame = None) -> ColumnTransformer:
         """
         Create a preprocessing pipeline for numeric and categorical features.
+
+        Args:
+            X_train: Training data to dynamically detect feature types (optional)
 
         Returns:
             ColumnTransformer object with preprocessing steps
         """
-        # Get engineered features from config
-        engineered_features = self.config['features'].get('engineered_features', [])
+        # Initialize feature lists
+        numeric_features = []
+        categorical_features = []
         
-        # Update feature lists to include engineered features
-        # MonthlyToTotalRatio and NumAdditionalServices are numeric
-        # HasInternetService is binary (0/1) so should be numeric
-        numeric_features = self.numeric_features + [
-            feat for feat in engineered_features 
-            if feat in ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
-        ]
-        
-        # Categorical features remain the same (no engineered features are categorical)
-        categorical_features = self.categorical_features
+        if X_train is not None:
+            # Dynamic feature detection like in parameter search notebook
+            numeric_features = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
+            if 'SeniorCitizen' in numeric_features:
+                numeric_features.remove('SeniorCitizen') # Remove if present
+
+            categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
+            # Add 'SeniorCitizen' to categorical features
+            categorical_features.append('SeniorCitizen')
+
+            # Include newly engineered features if they are numeric
+            engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+            for feat in engineered_numeric:
+                if feat in X_train.columns and feat not in numeric_features:
+                     # Check if it's actually numeric in the DataFrame
+                     if pd.api.types.is_numeric_dtype(X_train[feat]):
+                          numeric_features.append(feat)
+        else:
+            # Fallback to config-based feature lists
+            engineered_features = self.config['features'].get('engineered_features', [])
+            numeric_features = self.numeric_features.copy()
+            categorical_features = self.categorical_features.copy()
+            
+            if 'SeniorCitizen' in numeric_features:
+                numeric_features.remove('SeniorCitizen')
+            if 'SeniorCitizen' not in categorical_features:
+                categorical_features.append('SeniorCitizen')
+            
+            engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+            for feat in engineered_numeric:
+                if feat in engineered_features and feat not in numeric_features:
+                    numeric_features.append(feat)
 
         # Numeric preprocessing
         numeric_transformer = Pipeline(steps=[

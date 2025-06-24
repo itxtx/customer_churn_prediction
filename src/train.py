@@ -451,7 +451,7 @@ class ModelTrainer:
             
             pipeline = ImbPipeline([
                 ('engineer', FeatureEngineer()),
-                ('preprocessor', self.data_processor.create_preprocessing_pipeline()),
+                ('preprocessor', self.data_processor.create_preprocessing_pipeline(X_train)),
                 ('resampler', resampler),
                 ('classifier', classifier)
             ])
