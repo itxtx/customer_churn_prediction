@@ -14,8 +14,8 @@ print("Testing imports...")
 
 # Test data_processing imports
 try:
-    from src.data_processing import DataProcessor, FeatureEngineer
-    print("✓ Successfully imported DataProcessor and FeatureEngineer")
+    from src.data_processing import DataProcessor
+    print("✓ Successfully imported DataProcessor")
 except ImportError as e:
     print(f"✗ Failed to import from data_processing: {e}")
 

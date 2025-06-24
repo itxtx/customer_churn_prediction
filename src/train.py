@@ -26,7 +26,7 @@ from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
 
 # Import the actual data processing classes
-from src.data_processing import DataProcessor, FeatureEngineer
+from src.data_processing import DataProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -112,23 +112,24 @@ class ModelTrainer:
             An ImbPipeline object ready for tuning.
         """
         if model_name == 'logistic':
-            classifier = LogisticRegression(random_state=self.config['data']['random_state'], max_iter=1000)
+            classifier = LogisticRegression(random_state=self.config['data']['random_state'], max_iter=1000, n_jobs=-1)
         elif model_name == 'random_forest':
             classifier = RandomForestClassifier(random_state=self.config['data']['random_state'], n_jobs=-1)
         elif model_name == 'gradient_boosting':
-            classifier = GradientBoostingClassifier(random_state=self.config['data']['random_state'])
+            classifier = GradientBoostingClassifier(random_state=self.config['data']['random_state'], n_jobs=-1)
         elif model_name == 'xgboost':
             classifier = XGBClassifier(
                 random_state=self.config['data']['random_state'],
                 objective='binary:logistic',
                 eval_metric='logloss',
-                use_label_encoder=False
+                use_label_encoder=False,
+                n_jobs=-1  
             )
         else:
             raise ValueError(f"Unknown model name: {model_name}")
 
         pipeline = ImbPipeline([
-            ('engineer', FeatureEngineer()),
+
             ('preprocessor', preprocessor),
             ('resampler', 'passthrough'),  # Placeholder for resampling
             ('classifier', classifier)
@@ -277,14 +278,22 @@ class ModelTrainer:
         y_pred = pipeline.predict(X_test)
         y_pred_proba = pipeline.predict_proba(X_test)[:, 1]
 
-        f1 = f1_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
+        # Determine the positive label based on target data type
+        if y_test.dtype == 'object' or y_test.dtype == 'string':
+            # String labels like 'Yes'/'No'
+            pos_label = 'Yes'
+        else:
+            # Integer labels like 1/0 (encoded)
+            pos_label = 1
+
+        f1 = f1_score(y_test, y_pred, pos_label=pos_label)
+        recall = recall_score(y_test, y_pred, pos_label=pos_label)
         roc_auc = roc_auc_score(y_test, y_pred_proba)
-        fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+        fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba, pos_label=pos_label)
 
         results = {
             'model_name': model_name,
-            'f1_score': f1,
+            'f1': f1,
             'recall': recall,
             'roc_auc': roc_auc,
             'classification_report': classification_report(y_test, y_pred, output_dict=True),
@@ -408,6 +417,7 @@ class ModelTrainer:
         from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
         from xgboost import XGBClassifier
         from imblearn.over_sampling import RandomOverSampler, SMOTE
+        from sklearn.preprocessing import LabelEncoder
         
         all_results = {}
         best_score = -1
@@ -415,6 +425,11 @@ class ModelTrainer:
         scoring_metric = self.config['training']['scoring_metric']
         
         logger.info(f"\n{'='*50}\nTraining Fresh Models with Best Hyperparameters\n{'='*50}")
+        
+        # Create label encoder for target variable
+        label_encoder = LabelEncoder()
+        y_train_encoded = label_encoder.fit_transform(y_train)
+        y_test_encoded = label_encoder.transform(y_test)
         
         for model_name, params in best_params_dict.items():
             logger.info(f"\nTraining {model_name}...")
@@ -450,22 +465,22 @@ class ModelTrainer:
                 continue
             
             pipeline = ImbPipeline([
-                ('engineer', FeatureEngineer()),
                 ('preprocessor', self.data_processor.create_preprocessing_pipeline(X_train)),
                 ('resampler', resampler),
                 ('classifier', classifier)
             ])
             
-            # Fit on training data only
-            pipeline.fit(X_train, y_train)
+            # Fit on training data only (using encoded labels)
+            pipeline.fit(X_train, y_train_encoded)
             
-            # Evaluate on test data
-            test_results = self.evaluate_model(pipeline, X_test, y_test, model_name)
+            # Evaluate on test data (using encoded labels)
+            test_results = self.evaluate_model(pipeline, X_test, y_test_encoded, model_name)
             
             # Store both evaluation results and the fitted pipeline
             all_results[model_name] = {
                 **test_results,
-                'pipeline': pipeline
+                'pipeline': pipeline,
+                'label_encoder': label_encoder
             }
             
             # Track best model
