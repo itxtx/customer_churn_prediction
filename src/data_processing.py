@@ -263,9 +263,19 @@ class DataProcessor:
         Returns:
             ColumnTransformer object with preprocessing steps
         """
+        # Get engineered features from config
+        engineered_features = self.config['features'].get('engineered_features', [])
+        
         # Update feature lists to include engineered features
-        numeric_features = self.numeric_features + ['MonthlyToTotalRatio', 'NumAdditionalServices']
-        categorical_features = self.categorical_features + ['HasInternetService'] # HasInternetService is binary (0/1), but was created from a categorical, so it's safer to treat it as categorical for OneHotEncoder if it might have been other values, or numeric for StandardScaler if strictly 0/1. Given its nature, it might be better handled as numeric if it's always 0/1, or ensure it is correctly encoded. For now, keeping it here to ensure it passes through the correct transformer.
+        # MonthlyToTotalRatio and NumAdditionalServices are numeric
+        # HasInternetService is binary (0/1) so should be numeric
+        numeric_features = self.numeric_features + [
+            feat for feat in engineered_features 
+            if feat in ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
+        ]
+        
+        # Categorical features remain the same (no engineered features are categorical)
+        categorical_features = self.categorical_features
 
         # Numeric preprocessing
         numeric_transformer = Pipeline(steps=[
