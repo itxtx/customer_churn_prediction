@@ -45,24 +45,7 @@ class ModelTrainer:
         """
         # Create a dummy config if not present for standalone execution
         if not os.path.exists(config_path):
-            dummy_config = {
-                'models': {
-                    'output_dir': 'models',
-                    'models_to_train': ['random_forest', 'xgboost'],
-                    'best_pipeline_name': 'best_pipeline.pkl',
-                    'final_model_name': 'final_model.pkl'
-                },
-                'data': {'test_size': 0.2, 'random_state': 42},
-                'training': {
-                    'cv_folds': 5,
-                    'scoring_metric': 'f1',
-                    'tuning_strategy': 'random',
-                    'n_iter_search': 10
-                }
-            }
-            with open(config_path, 'w') as f:
-                yaml.dump(dummy_config, f)
-            logger.info(f"Created dummy config file at {config_path}")
+            raise FileNotFoundError(f"Config file not found at {config_path}")
 
         with open(config_path, 'r') as file:
             self.config = yaml.safe_load(file)
