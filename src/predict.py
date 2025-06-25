@@ -36,26 +36,24 @@ class ChurnPredictor:
         Load a trained model from disk.
         
         Args:
-            model_path: Path to the model file. If None, loads the best model.
+            model_path: Path to the model file. If None, loads the xgboost model.
             
         Returns:
             Boolean indicating success
         """
         try:
             if model_path is None:
-                # Find the best model in the models directory
-                model_files = [f for f in os.listdir(self.models_dir) 
-                             if f.startswith('best_model_') and f.endswith('.pkl')]
+                # Use the xgboost model by default
+                model_path = os.path.join(self.models_dir, 'xgboost_model.pkl')
+                self.model_name = 'xgboost'
                 
-                if not model_files:
-                    logger.error("No best model found in models directory")
+                if not os.path.exists(model_path):
+                    logger.error(f"XGBoost model not found at {model_path}")
                     return False
-                
-                model_path = os.path.join(self.models_dir, model_files[0])
-                self.model_name = model_files[0].replace('best_model_', '').replace('.pkl', '')
             
             self.model = joblib.load(model_path)
             logger.info(f"Model loaded successfully from {model_path}")
+            logger.info(f"Model type: {type(self.model)}")
             return True
             
         except Exception as e:
@@ -79,7 +77,7 @@ class ChurnPredictor:
         df = self.data_processor.clean_data(df)
         
         # Add engineered features
-        #df = self.data_processor.calculate_derived_features(df)
+        df = self.data_processor.calculate_derived_features(df)
         
         # Remove customerID if present
         if self.data_processor.customer_id_column in df.columns:
@@ -90,156 +88,95 @@ class ChurnPredictor:
             
         return df, customer_id
     
-    def prepare_batch_customers(self, customers_data: Union[List[Dict], pd.DataFrame]) -> pd.DataFrame:
+    def prepare_batch_customers(self, customers_data: Union[List[Dict], pd.DataFrame]) -> tuple[pd.DataFrame, list]:
         """
-        Prepare batch customer data for prediction.
-        
-        Args:
-            customers_data: List of dictionaries or DataFrame with customer features
-            
-        Returns:
-            Prepared DataFrame
+        Prepare batch customer data for prediction. This is the single source of truth for data prep.
         """
-        # Convert to DataFrame if needed
         if isinstance(customers_data, list):
             df = pd.DataFrame(customers_data)
         else:
             df = customers_data.copy()
         
-        # Clean data
+        # Clean data and add engineered features
         df = self.data_processor.clean_data(df)
-        
-        # Add engineered features
         df = self.data_processor.calculate_derived_features(df)
         
-        # Store customer IDs if present
+        # Store and drop customer IDs
+        customer_ids = None
         if self.data_processor.customer_id_column in df.columns:
             customer_ids = df[self.data_processor.customer_id_column].tolist()
             df = df.drop(columns=[self.data_processor.customer_id_column])
-        else:
-            customer_ids = None
             
         return df, customer_ids
     
     def predict_single(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Make prediction for a single customer.
-        
-        Args:
-            customer_data: Dictionary with customer features
-            
-        Returns:
-            Dictionary with prediction results
+        Make a prediction for a single customer by wrapping the batch method.
         """
         if self.model is None:
             raise ValueError("Model not loaded. Call load_model() first.")
         
-        # Prepare data
-        df, customer_id = self.prepare_single_customer(customer_data)
-        
-        # Validate data
-        validation_issues = self.data_processor.validate_data(df)
-        if validation_issues['missing_columns']:
-            logger.warning(f"Missing columns: {validation_issues['missing_columns']}")
-        
-        # Make prediction
-        try:
-            prediction = self.model.predict(df)[0]
-            probability = self.model.predict_proba(df)[0, 1]  # Probability of churn
-            
-            result = {
-                'customer_id': customer_id,
-                'churn_prediction': 'Yes' if prediction == 1 else 'No',
-                'churn_probability': float(probability),
-                'risk_level': self._get_risk_level(probability),
-                'confidence': float(max(self.model.predict_proba(df)[0]))
-            }
-            
-            logger.info(f"Prediction for customer {customer_id}: {result['churn_prediction']} "
-                       f"(probability: {result['churn_probability']:.3f})")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error making prediction: {e}")
-            return {
-                'customer_id': customer_id,
-                'error': str(e)
-            }
-    
+        # This guarantees a single prediction uses the exact same logic as a batch prediction.
+        prediction_result = self.predict_batch([customer_data])
+        return prediction_result[0]
+
     def predict_batch(self, customers_data: Union[List[Dict], pd.DataFrame]) -> List[Dict[str, Any]]:
         """
-        Make predictions for multiple customers.
-        
-        Args:
-            customers_data: List of dictionaries or DataFrame with customer features
-            
-        Returns:
-            List of prediction results
+        Make predictions for multiple customers using a fully vectorized approach.
+        This method is significantly faster and more robust than a looped approach.
         """
         if self.model is None:
             raise ValueError("Model not loaded. Call load_model() first.")
         
-        # Prepare data
+        # 1. Prepare data using the single, reliable prep method
         df, customer_ids = self.prepare_batch_customers(customers_data)
         
-        # Validate data
-        validation_issues = self.data_processor.validate_data(df)
-        if validation_issues['missing_columns']:
-            logger.warning(f"Missing columns: {validation_issues['missing_columns']}")
-            # Only proceed if missing columns are not critical for prediction
-            critical_columns = ['tenure', 'MonthlyCharges', 'TotalCharges', 'Contract']
-            missing_critical = [col for col in critical_columns if col in validation_issues['missing_columns']]
-            if missing_critical:
-                raise ValueError(f"Missing critical columns for prediction: {missing_critical}")
+        # Create a DataFrame to hold the results
+        results_df = pd.DataFrame(index=df.index)
+
+        # 2. Make predictions ONCE for the entire batch
+        predictions = self.model.predict(df)
+        proba_matrix = self.model.predict_proba(df)
         
-        # Make predictions
-        try:
-            predictions = self.model.predict(df)
-            probabilities = self.model.predict_proba(df)[:, 1]
-            
-            results = []
-            for i in range(len(predictions)):
-                result = {
-                    'customer_id': customer_ids[i] if customer_ids else f"customer_{i}",
-                    'churn_prediction': 'Yes' if predictions[i] == 1 else 'No',
-                    'churn_probability': float(probabilities[i]),
-                    'risk_level': self._get_risk_level(probabilities[i]),
-                    'confidence': float(max(self.model.predict_proba(df)[i]))
-                }
-                results.append(result)
-            
-            # Summary statistics
-            churn_count = sum(1 for p in predictions if p == 1)
-            logger.info(f"Batch prediction complete: {len(predictions)} customers, "
-                       f"{churn_count} predicted to churn ({churn_count/len(predictions)*100:.1f}%)")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error making batch predictions: {e}")
-            return [{'error': str(e)}]
-    
+        # 3. Assign all results using efficient, vectorized operations
+        results_df['churn_probability'] = proba_matrix[:, 1]
+        results_df['confidence'] = np.max(proba_matrix, axis=1)
+        
+        if customer_ids is not None:
+            results_df['customer_id'] = customer_ids
+        else:
+            results_df['customer_id'] = [f"customer_{i}" for i in range(len(df))]
+
+        conditions = [
+            (results_df['churn_probability'] >= 0.8),
+            (results_df['churn_probability'] >= 0.6),
+            (results_df['churn_probability'] >= 0.4),
+            (results_df['churn_probability'] >= 0.2)
+        ]
+        choices = ['Very High', 'High', 'Medium', 'Low']
+        results_df['risk_level'] = np.select(conditions, choices, default='Very Low')
+        
+        results_df['churn_prediction'] = pd.Series(predictions, index=df.index).map({0: 'No', 1: 'Yes'})
+        
+        # Log a summary
+        churn_count = (results_df['churn_prediction'] == 'Yes').sum()
+        logger.info(f"Batch prediction complete: {len(df)} customers, "
+                    f"{churn_count} predicted to churn ({churn_count/len(df)*100:.1f}%)")
+        
+        # 4. Return as a list of dictionaries to match the original output format
+        final_columns = ['customer_id', 'churn_prediction', 'churn_probability', 'risk_level', 'confidence']
+        return results_df[final_columns].to_dict(orient='records')
+
     def _get_risk_level(self, probability: float) -> str:
         """
-        Categorize churn risk based on probability.
-        
-        Args:
-            probability: Churn probability
-            
-        Returns:
-            Risk level category
+        Categorize churn risk based on probability. (Kept from original)
         """
-        if probability >= 0.8:
-            return 'Very High'
-        elif probability >= 0.6:
-            return 'High'
-        elif probability >= 0.4:
-            return 'Medium'
-        elif probability >= 0.2:
-            return 'Low'
-        else:
-            return 'Very Low'
+        if probability >= 0.8: return 'Very High'
+        elif probability >= 0.6: return 'High'
+        elif probability >= 0.4: return 'Medium'
+        elif probability >= 0.2: return 'Low'
+        else: return 'Very Low'
+
     
     def explain_prediction(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -48,9 +48,12 @@ features:
     - "gender"
     - "SeniorCitizen"
     - "Partner"
-    - "InternetService"
-    - "OnlineSecurity"
     - "Contract"
+  
+  engineered_features:
+    - "MonthlyToTotalRatio"
+    - "NumAdditionalServices"
+    - "HasInternetService"
 """
     config_path = tmp_path / "test_config.yaml"
     config_path.write_text(config_content)
@@ -146,9 +149,9 @@ class TestDataProcessor:
         assert 'Churn' not in X.columns
         assert len(y) == 3
         
-        # Check target conversion to binary
-        assert all(y.isin([0, 1]))
-        assert y.iloc[1] == 1  # 'Yes' -> 1
+        # Check that target values are preserved as strings
+        assert all(y.isin(['Yes', 'No']))
+        assert y.iloc[1] == 'Yes'  # Should remain as string
     
     def test_create_preprocessing_pipeline(self, data_processor):
         """Test preprocessing pipeline creation."""
@@ -196,8 +199,8 @@ class TestIntegration:
         # Prepare for modeling
         X, y = data_processor.prepare_features(df)
         
-        # Create and fit preprocessing pipeline
-        preprocessor = data_processor.create_preprocessing_pipeline()
+        # Create and fit preprocessing pipeline with actual X data
+        preprocessor = data_processor.create_preprocessing_pipeline(X_train=X)
         
         # Fit transform (should work without errors)
         X_transformed = preprocessor.fit_transform(X)

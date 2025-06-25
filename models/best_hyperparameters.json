@@ -1,0 +1,38 @@
+{
+  "random_forest": {
+    "classifier__bootstrap": true,
+    "classifier__class_weight": null,
+    "classifier__max_depth": 8,
+    "classifier__max_features": "log2",
+    "classifier__min_samples_leaf": 4,
+    "classifier__min_samples_split": 12,
+    "classifier__n_estimators": 212,
+    "resampler__sampling_strategy": 0.9258112243519689
+  },
+  "xgboost": {
+    "classifier__colsample_bytree": 0.6,
+    "classifier__gamma": 0.05,
+    "classifier__learning_rate": 0.008464520496759586,
+    "classifier__max_depth": 4,
+    "classifier__n_estimators": 550,
+    "classifier__reg_alpha": 0.02,
+    "classifier__reg_lambda": 0.05,
+    "classifier__scale_pos_weight": 0.8,
+    "classifier__subsample": 0.6,
+    "resampler__sampling_strategy": 0.8
+  },
+  "gradient_boosting": {
+    "classifier__learning_rate": 0.02,
+    "classifier__max_depth": 3,
+    "classifier__min_samples_leaf": 2,
+    "classifier__min_samples_split": 3,
+    "classifier__n_estimators": 290,
+    "classifier__subsample": 0.7,
+    "resampler__k_neighbors": 5
+  },
+  "logistic": {
+    "classifier__C": 0.001,
+    "classifier__penalty": "l2",
+    "classifier__solver": "liblinear"
+  }
+}

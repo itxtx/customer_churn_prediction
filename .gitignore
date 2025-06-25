@@ -95,8 +95,7 @@ poetry.lock
 # data
 *.csv
 *.db
-*.pkl
-/models/*
+
 # PEP 582
 __pypackages__/
 
@@ -112,3 +111,6 @@ celerybeat.pid
 .venv
 env/
 venv
+tags
+CODE_INDEX.md
+*/.DS_Store
