@@ -112,5 +112,6 @@ celerybeat.pid
 .venv
 env/
 venv
-
+tags
+CODE_INDEX.md
 */.DS_Store
