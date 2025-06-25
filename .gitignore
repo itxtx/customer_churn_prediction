@@ -95,8 +95,7 @@ poetry.lock
 # data
 *.csv
 *.db
-*.pkl
-/models/*
+
 # PEP 582
 __pypackages__/
 

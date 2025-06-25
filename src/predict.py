@@ -36,26 +36,24 @@ class ChurnPredictor:
         Load a trained model from disk.
         
         Args:
-            model_path: Path to the model file. If None, loads the best model.
+            model_path: Path to the model file. If None, loads the xgboost model.
             
         Returns:
             Boolean indicating success
         """
         try:
             if model_path is None:
-                # Find the best model in the models directory
-                model_files = [f for f in os.listdir(self.models_dir) 
-                             if f.startswith('best_model_') and f.endswith('.pkl')]
+                # Use the xgboost model by default
+                model_path = os.path.join(self.models_dir, 'xgboost_model.pkl')
+                self.model_name = 'xgboost'
                 
-                if not model_files:
-                    logger.error("No best model found in models directory")
+                if not os.path.exists(model_path):
+                    logger.error(f"XGBoost model not found at {model_path}")
                     return False
-                
-                model_path = os.path.join(self.models_dir, model_files[0])
-                self.model_name = model_files[0].replace('best_model_', '').replace('.pkl', '')
             
             self.model = joblib.load(model_path)
             logger.info(f"Model loaded successfully from {model_path}")
+            logger.info(f"Model type: {type(self.model)}")
             return True
             
         except Exception as e:

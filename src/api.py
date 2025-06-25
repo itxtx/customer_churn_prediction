@@ -33,25 +33,25 @@ db = Database()
 class CustomerData(BaseModel):
     """Model for customer data input."""
     customerID: Optional[str] = Field(None, description="Customer ID")
-    gender: str = Field(..., description="Customer gender")
-    SeniorCitizen: int = Field(..., description="Whether customer is senior citizen (0/1)")
-    Partner: str = Field(..., description="Whether customer has partner")
-    Dependents: str = Field(..., description="Whether customer has dependents")
-    tenure: int = Field(..., description="Number of months with company")
-    PhoneService: str = Field(..., description="Whether customer has phone service")
-    MultipleLines: str = Field(..., description="Whether customer has multiple lines")
-    InternetService: str = Field(..., description="Type of internet service")
-    OnlineSecurity: str = Field(..., description="Whether customer has online security")
-    OnlineBackup: str = Field(..., description="Whether customer has online backup")
-    DeviceProtection: str = Field(..., description="Whether customer has device protection")
-    TechSupport: str = Field(..., description="Whether customer has tech support")
-    StreamingTV: str = Field(..., description="Whether customer has streaming TV")
-    StreamingMovies: str = Field(..., description="Whether customer has streaming movies")
-    Contract: str = Field(..., description="Contract type")
-    PaperlessBilling: str = Field(..., description="Whether customer has paperless billing")
-    PaymentMethod: str = Field(..., description="Payment method")
-    MonthlyCharges: float = Field(..., description="Monthly charges")
-    TotalCharges: float = Field(..., description="Total charges")
+    gender: Optional[str] = Field(None, description="Customer gender")
+    SeniorCitizen: Optional[int] = Field(None, description="Whether customer is senior citizen (0/1)")
+    Partner: Optional[str] = Field(None, description="Whether customer has partner")
+    Dependents: Optional[str] = Field(None, description="Whether customer has dependents")
+    tenure: Optional[int] = Field(None, ge=0, description="Number of months with company")
+    PhoneService: Optional[str] = Field(None, description="Whether customer has phone service")
+    MultipleLines: Optional[str] = Field(None, description="Whether customer has multiple lines")
+    InternetService: Optional[str] = Field(None, description="Type of internet service")
+    OnlineSecurity: Optional[str] = Field(None, description="Whether customer has online security")
+    OnlineBackup: Optional[str] = Field(None, description="Whether customer has online backup")
+    DeviceProtection: Optional[str] = Field(None, description="Whether customer has device protection")
+    TechSupport: Optional[str] = Field(None, description="Whether customer has tech support")
+    StreamingTV: Optional[str] = Field(None, description="Whether customer has streaming TV")
+    StreamingMovies: Optional[str] = Field(None, description="Whether customer has streaming movies")
+    Contract: Optional[str] = Field(None, description="Contract type")
+    PaperlessBilling: Optional[str] = Field(None, description="Whether customer has paperless billing")
+    PaymentMethod: Optional[str] = Field(None, description="Payment method")
+    MonthlyCharges: Optional[float] = Field(None, ge=0, description="Monthly charges")
+    TotalCharges: Optional[float] = Field(None, ge=0, description="Total charges")
 
     class Config:
         schema_extra = {
@@ -93,9 +93,9 @@ class PredictionResponse(BaseModel):
 class BatchPredictionResponse(BaseModel):
     """Model for batch prediction response."""
     predictions: List[PredictionResponse]
-    total_customers: int
-    high_risk_count: int
-    processing_time_seconds: float
+    total_customers: int = 0
+    high_risk_count: int = 0
+    processing_time_seconds: float = 0.0
 
 
 class HealthResponse(BaseModel):
@@ -174,8 +174,12 @@ async def predict_single(customer: CustomerData):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class BatchPredictionRequest(BaseModel):
+    """Model for batch prediction request."""
+    customers: List[CustomerData] = Field(..., min_items=1, max_items=1000)
+
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
-async def predict_batch(customers: List[CustomerData]):
+async def predict_batch(request: BatchPredictionRequest):
     """
     Predict churn for multiple customers.
     
@@ -190,7 +194,7 @@ async def predict_batch(customers: List[CustomerData]):
         start_time = time.time()
         
         # Convert to list of dicts
-        customers_data = [customer.dict() for customer in customers]
+        customers_data = [customer.dict() for customer in request.customers]
         
         # Make predictions
         results = predictor.predict_batch(customers_data)
