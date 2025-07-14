@@ -302,41 +302,6 @@ Run specific test modules:
 python -m pytest tests/test_data_processing.py -v
 ```
 
-## Project Structure (Updated)
-
-```
-customer_churn_prediction/
-├── data/
-│   └── raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
-├── models/                           # Trained models and artifacts
-│   ├── best_model_xgboost.pkl
-│   ├── best_model_random_forest.pkl
-│   ├── best_model_gradient_boosting.pkl
-│   └── best_hyperparameters.json
-├── notebooks/                        # Analysis and experimentation
-│   ├── churn_notebook.ipynb
-│   ├── parameter_search.ipynb
-│   ├── advanced_simulation.ipynb
-│   └── price_impact_simulation.ipynb
-├── src/                             # Main source code
-│   ├── __init__.py
-│   ├── api.py                       # FastAPI web service
-│   ├── data_processing.py           # Data pipeline
-│   ├── database.py                  # Database operations
-│   ├── main.py                      # CLI interface
-│   ├── predict.py                   # Prediction engine
-│   ├── simulation_utils.py          # Monte Carlo simulations
-│   └── train.py                     # Model training
-├── tests/                           # Unit tests
-│   ├── __init__.py
-│   └── test_data_processing.py
-├── graphs/                          # Generated visualizations
-├── config.yaml                      # Configuration
-├── requirements.txt                 # Dependencies
-├── readme.md                        # This file
-└── TECHNICAL_RESULTS.md            # Detailed technical analysis
-```
-
 ## Configuration
 
 The `config.yaml` file controls all aspects of the pipeline:
