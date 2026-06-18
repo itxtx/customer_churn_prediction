@@ -171,9 +171,7 @@ python -m src.main train --config config.yaml
 python -m src.main predict --batch-file tests/fixtures/customers.csv
 ```
 
-The CI workflow runs dependency install, tests, and a CLI smoke check. It does not run full hyperparameter tuning.
-
-## Results
+## Configuration
 
 See [TECHNICAL_RESULTS.md](TECHNICAL_RESULTS.md) for the current modeling summary and interpretation notes. Regenerate detailed metrics locally with:
 
