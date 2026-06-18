@@ -241,8 +241,8 @@ class DataProcessor:
                 numeric_features.remove('SeniorCitizen') # Remove if present
 
             categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
-            # Add 'SeniorCitizen' to categorical features
-            categorical_features.append('SeniorCitizen')
+            if 'SeniorCitizen' in X_train.columns and 'SeniorCitizen' not in categorical_features:
+                categorical_features.append('SeniorCitizen')
 
             # Include newly engineered features if they are numeric
             engineered_numeric = ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService']
@@ -311,10 +311,18 @@ class DataProcessor:
         # Define a comprehensive list of expected columns for validation.
         # Ensure that newly engineered features that are expected to be present
         # after calculate_derived_features are also included here for robust validation.
+        service_columns = {
+            'OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
+            'TechSupport', 'StreamingTV', 'StreamingMovies'
+        }
+        categorical_columns = [
+            col for col in self.categorical_features
+            if col not in service_columns and col != 'InternetService'
+        ]
         expected_columns = (
-            [col for col in self.numeric_features if col != 'TotalCharges'] + # Exclude TotalCharges to check separately after cleaning
-            self.categorical_features +
-            ['TotalCharges', 'MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService'] +
+            self.numeric_features +
+            categorical_columns +
+            ['MonthlyToTotalRatio', 'NumAdditionalServices', 'HasInternetService'] +
             [self.target_column, self.customer_id_column]
         )
         
@@ -340,7 +348,10 @@ class DataProcessor:
                 issues['data_type_issues'].append(f"{col} should be numeric, but is {df[col].dtype}")
         
         # Check data types for expected categorical features (after potential str conversion)
-        final_categorical_features = self.categorical_features + ['HasInternetService']
+        final_categorical_features = [
+            col for col in self.categorical_features
+            if col not in service_columns and col != 'InternetService'
+        ]
         for col in final_categorical_features:
             if col in df.columns and not pd.api.types.is_string_dtype(df[col]) and not pd.api.types.is_object_dtype(df[col]):
                 issues['data_type_issues'].append(f"{col} should be categorical/object, but is {df[col].dtype}")

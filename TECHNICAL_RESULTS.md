@@ -11,7 +11,7 @@ This document provides a detailed overview of the technical analysis, feature en
 ### 2.1. Evaluation of the Data Preprocessing Pipeline
 The standard data preprocessing pipeline is robust and follows industry best practices. It employs a `ColumnTransformer` to apply distinct transformations to numeric and categorical features.
 - **Numeric Features**: The pipeline uses `SimpleImputer` with a **median** strategy (robust to outliers) followed by `StandardScaler` (essential for models like Logistic Regression).
-- **Categorical Features**: The pipeline uses `SimpleImputer` with a **most_frequent** strategy to handle missing values, followed by `OneHotEncoder`. The encoder is configured with `handle_unknown='ignore'`, a defensive, production-ready choice that prevents errors if new, unseen categories are encountered during prediction.
+- **Categorical Features**: The pipeline uses `SimpleImputer` with a **most_frequent** strategy to handle missing values, followed by `OneHotEncoder`. The encoder is configured with `handle_unknown='ignore'`, a defensive choice that prevents errors if new, unseen categories are encountered during prediction.
 
 ### 2.2. Impact Analysis of Engineered Features
 The `FeatureEngineer` class introduces three high-quality features to capture more complex data relationships:

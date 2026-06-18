@@ -1,60 +1,46 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
 import logging
-import yaml
+from contextlib import asynccontextmanager
 from datetime import datetime
-import uvicorn
-from src.predict import ChurnPredictor
-from src.database import Database
+from typing import Any, Dict, List, Optional
 
-# Set up logging
+import yaml
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.predict import ChurnPredictor
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Customer Churn Prediction API",
-    description="API for predicting customer churn using machine learning",
-    version="1.0.0"
-)
-
-# Load configuration
-with open("config.yaml", 'r') as file:
+with open("config.yaml", "r") as file:
     config = yaml.safe_load(file)
 
-# Initialize predictor and database
 predictor = ChurnPredictor()
-db = Database()
 
 
-# Pydantic models for request/response validation
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting Customer Churn Prediction API.")
+    if predictor.load_model():
+        logger.info("Model loaded successfully.")
+    else:
+        logger.warning("Model is not loaded. Prediction endpoints will return 503.")
+    yield
+
+
+app = FastAPI(
+    title="Customer Churn Prediction API",
+    description="API for serving the configured customer churn model.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+
 class CustomerData(BaseModel):
-    """Model for customer data input."""
-    customerID: Optional[str] = Field(None, description="Customer ID")
-    gender: Optional[str] = Field(None, description="Customer gender")
-    SeniorCitizen: Optional[int] = Field(None, description="Whether customer is senior citizen (0/1)")
-    Partner: Optional[str] = Field(None, description="Whether customer has partner")
-    Dependents: Optional[str] = Field(None, description="Whether customer has dependents")
-    tenure: Optional[int] = Field(None, ge=0, description="Number of months with company")
-    PhoneService: Optional[str] = Field(None, description="Whether customer has phone service")
-    MultipleLines: Optional[str] = Field(None, description="Whether customer has multiple lines")
-    InternetService: Optional[str] = Field(None, description="Type of internet service")
-    OnlineSecurity: Optional[str] = Field(None, description="Whether customer has online security")
-    OnlineBackup: Optional[str] = Field(None, description="Whether customer has online backup")
-    DeviceProtection: Optional[str] = Field(None, description="Whether customer has device protection")
-    TechSupport: Optional[str] = Field(None, description="Whether customer has tech support")
-    StreamingTV: Optional[str] = Field(None, description="Whether customer has streaming TV")
-    StreamingMovies: Optional[str] = Field(None, description="Whether customer has streaming movies")
-    Contract: Optional[str] = Field(None, description="Contract type")
-    PaperlessBilling: Optional[str] = Field(None, description="Whether customer has paperless billing")
-    PaymentMethod: Optional[str] = Field(None, description="Payment method")
-    MonthlyCharges: Optional[float] = Field(None, ge=0, description="Monthly charges")
-    TotalCharges: Optional[float] = Field(None, ge=0, description="Total charges")
+    """Validated model input matching the Telco churn feature schema."""
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "customerID": "7590-VHVEG",
                 "gender": "Female",
@@ -75,13 +61,34 @@ class CustomerData(BaseModel):
                 "PaperlessBilling": "Yes",
                 "PaymentMethod": "Electronic check",
                 "MonthlyCharges": 29.85,
-                "TotalCharges": 29.85
+                "TotalCharges": 29.85,
             }
         }
+    )
+
+    customerID: Optional[str] = Field(None, description="Customer ID")
+    gender: str = Field(..., description="Customer gender")
+    SeniorCitizen: int = Field(..., ge=0, le=1, description="Whether customer is senior citizen (0/1)")
+    Partner: str = Field(..., description="Whether customer has partner")
+    Dependents: str = Field(..., description="Whether customer has dependents")
+    tenure: int = Field(..., ge=0, description="Number of months with company")
+    PhoneService: str = Field(..., description="Whether customer has phone service")
+    MultipleLines: str = Field(..., description="Whether customer has multiple lines")
+    InternetService: str = Field(..., description="Type of internet service")
+    OnlineSecurity: str = Field(..., description="Whether customer has online security")
+    OnlineBackup: str = Field(..., description="Whether customer has online backup")
+    DeviceProtection: str = Field(..., description="Whether customer has device protection")
+    TechSupport: str = Field(..., description="Whether customer has tech support")
+    StreamingTV: str = Field(..., description="Whether customer has streaming TV")
+    StreamingMovies: str = Field(..., description="Whether customer has streaming movies")
+    Contract: str = Field(..., description="Contract type")
+    PaperlessBilling: str = Field(..., description="Whether customer has paperless billing")
+    PaymentMethod: str = Field(..., description="Payment method")
+    MonthlyCharges: float = Field(..., ge=0, description="Monthly charges")
+    TotalCharges: float = Field(..., ge=0, description="Total charges")
 
 
 class PredictionResponse(BaseModel):
-    """Model for prediction response."""
     customer_id: Optional[str]
     churn_prediction: str
     churn_probability: float
@@ -90,290 +97,108 @@ class PredictionResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
+class BatchPredictionRequest(BaseModel):
+    customers: List[CustomerData] = Field(..., min_length=1, max_length=1000)
+
+
 class BatchPredictionResponse(BaseModel):
-    """Model for batch prediction response."""
     predictions: List[PredictionResponse]
-    total_customers: int = 0
-    high_risk_count: int = 0
-    processing_time_seconds: float = 0.0
+    total_customers: int
+    high_risk_count: int
+    processing_time_seconds: float
 
 
 class HealthResponse(BaseModel):
-    """Model for health check response."""
     status: str
     model_loaded: bool
-    database_connected: bool
+    model_path: str
     timestamp: datetime
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Load model on startup."""
-    logger.info("Starting API server...")
-    
-    # Load model
-    if not predictor.load_model():
-        logger.error("Failed to load model!")
-    else:
-        logger.info("Model loaded successfully")
-    
-    # Test database connection
-    try:
-        db.create_customers_table()
-        logger.info("Database connected successfully")
-    except Exception as e:
-        logger.error(f"Database connection failed: {e}")
+def _customer_to_dict(customer: CustomerData) -> Dict[str, Any]:
+    return customer.model_dump()
+
+
+def _ensure_model_loaded() -> None:
+    if predictor.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is not loaded. Run training or scripts/download_model.py first.",
+        )
 
 
 @app.get("/", response_model=Dict[str, str])
 async def root():
-    """Root endpoint."""
-    return {
-        "message": "Customer Churn Prediction API",
-        "docs": "/docs",
-        "health": "/health"
-    }
+    return {"message": "Customer Churn Prediction API", "docs": "/docs", "health": "/health"}
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint."""
     return HealthResponse(
-        status="healthy",
+        status="healthy" if predictor.model is not None else "degraded",
         model_loaded=predictor.model is not None,
-        database_connected=True,  # Simplified - could add actual check
-        timestamp=datetime.now()
+        model_path=predictor.final_model_path,
+        timestamp=datetime.now(),
     )
 
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_single(customer: CustomerData):
-    """
-    Predict churn for a single customer.
-    
-    Args:
-        customer: Customer data
-        
-    Returns:
-        Prediction response with churn probability and risk level
-    """
+    _ensure_model_loaded()
     try:
-        # Convert to dict
-        customer_dict = customer.dict()
-        
-        # Make prediction
-        result = predictor.predict_single(customer_dict)
-        
-        if 'error' in result:
-            raise HTTPException(status_code=400, detail=result['error'])
-        
+        result = predictor.predict_single(_customer_to_dict(customer))
         return PredictionResponse(**result)
-        
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Prediction error")
+        raise HTTPException(status_code=500, detail="Prediction failed") from exc
 
-
-class BatchPredictionRequest(BaseModel):
-    """Model for batch prediction request."""
-    customers: List[CustomerData] = Field(..., min_items=1, max_items=1000)
 
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
 async def predict_batch(request: BatchPredictionRequest):
-    """
-    Predict churn for multiple customers.
-    
-    Args:
-        customers: List of customer data
-        
-    Returns:
-        Batch prediction response with all predictions
-    """
+    _ensure_model_loaded()
     try:
         import time
+
         start_time = time.time()
-        
-        # Convert to list of dicts
-        customers_data = [customer.dict() for customer in request.customers]
-        
-        # Make predictions
+        customers_data = [_customer_to_dict(customer) for customer in request.customers]
         results = predictor.predict_batch(customers_data)
-        
-        # Count high risk customers
-        high_risk_count = sum(1 for r in results 
-                            if r.get('risk_level') in ['High', 'Very High'])
-        
-        # Convert to PredictionResponse objects
-        predictions = [PredictionResponse(**r) for r in results if 'error' not in r]
-        
-        processing_time = time.time() - start_time
-        
+        high_risk_count = sum(
+            1 for result in results if result.get("risk_level") in ["High", "Very High"]
+        )
+        predictions = [PredictionResponse(**result) for result in results]
         return BatchPredictionResponse(
             predictions=predictions,
             total_customers=len(predictions),
             high_risk_count=high_risk_count,
-            processing_time_seconds=processing_time
+            processing_time_seconds=time.time() - start_time,
         )
-        
-    except Exception as e:
-        logger.error(f"Batch prediction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Batch prediction error")
+        raise HTTPException(status_code=500, detail="Batch prediction failed") from exc
 
 
 @app.post("/predict/explain")
 async def explain_prediction(customer: CustomerData):
-    """
-    Get prediction with explanation for a single customer.
-    
-    Args:
-        customer: Customer data
-        
-    Returns:
-        Prediction with explanations and recommendations
-    """
+    _ensure_model_loaded()
     try:
-        # Convert to dict
-        customer_dict = customer.dict()
-        
-        # Get explanation
-        explanation = predictor.explain_prediction(customer_dict)
-        
-        return JSONResponse(content=explanation)
-        
-    except Exception as e:
-        logger.error(f"Explanation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/customers/{customer_id}")
-async def get_customer(customer_id: str):
-    """
-    Get customer data by ID.
-    
-    Args:
-        customer_id: Customer ID
-        
-    Returns:
-        Customer data if found
-    """
-    customer = db.get_customer(customer_id)
-    
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    
-    return customer
-
-
-@app.post("/customers/{customer_id}/predict")
-async def predict_for_existing_customer(customer_id: str):
-    """
-    Predict churn for an existing customer in the database.
-    
-    Args:
-        customer_id: Customer ID
-        
-    Returns:
-        Prediction response
-    """
-    # Get customer from database
-    customer = db.get_customer(customer_id)
-    
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    
-    # Remove non-feature columns
-    for col in ['created_at', 'updated_at', 'Churn']:
-        customer.pop(col, None)
-    
-    # Make prediction
-    result = predictor.predict_single(customer)
-    
-    if 'error' in result:
-        raise HTTPException(status_code=400, detail=result['error'])
-    
-    return PredictionResponse(**result)
-
-
-@app.get("/statistics")
-async def get_statistics():
-    """
-    Get churn statistics from the database.
-    
-    Returns:
-        Dictionary with churn statistics
-    """
-    try:
-        stats = db.get_churn_statistics()
-        return stats
-    except Exception as e:
-        logger.error(f"Statistics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/customers/{customer_id}/save-prediction")
-async def save_prediction(customer_id: str, background_tasks: BackgroundTasks):
-    """
-    Make prediction and save it to the database.
-    
-    Args:
-        customer_id: Customer ID
-        background_tasks: FastAPI background tasks
-        
-    Returns:
-        Success message
-    """
-    # Get customer
-    customer = db.get_customer(customer_id)
-    
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    
-    # Make prediction
-    for col in ['created_at', 'updated_at', 'Churn']:
-        customer.pop(col, None)
-    
-    result = predictor.predict_single(customer)
-    
-    # Save prediction in background
-    background_tasks.add_task(
-        save_prediction_to_db, 
-        customer_id, 
-        result
-    )
-    
-    return {"message": "Prediction queued for saving", "prediction": result}
-
-
-def save_prediction_to_db(customer_id: str, prediction: Dict[str, Any]):
-    """
-    Background task to save prediction to database.
-    
-    Args:
-        customer_id: Customer ID
-        prediction: Prediction result
-    """
-    try:
-        # Update customer record with prediction
-        update_data = {
-            'Churn': prediction['churn_prediction'],
-            'churn_probability': prediction['churn_probability'],
-            'last_prediction_date': datetime.now()
-        }
-        
-        db.update_customer(customer_id, update_data)
-        logger.info(f"Saved prediction for customer {customer_id}")
-        
-    except Exception as e:
-        logger.error(f"Error saving prediction: {e}")
+        return predictor.explain_prediction(_customer_to_dict(customer))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Explanation error")
+        raise HTTPException(status_code=500, detail="Explanation failed") from exc
 
 
 if __name__ == "__main__":
+    import uvicorn
 
-    
-    # Run the API
     uvicorn.run(
         app,
-        host=config['api']['host'],
-        port=config['api']['port'],
-        reload=config['api']['reload']
+        host=config["api"]["host"],
+        port=config["api"]["port"],
+        reload=config["api"]["reload"],
     )

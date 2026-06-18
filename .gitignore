@@ -94,7 +94,16 @@ poetry.lock
 
 # data
 *.csv
+!tests/fixtures/*.csv
 *.db
+data/raw/
+customer_churn.db
+
+# generated model artifacts
+models/
+notebooks/models/
+*.pkl
+*.joblib
 
 # PEP 582
 __pypackages__/
@@ -109,8 +118,10 @@ celerybeat.pid
 # Environments
 .env
 .venv
+new_churn_env/
 env/
 venv
 tags
 CODE_INDEX.md
 */.DS_Store
+.DS_Store
