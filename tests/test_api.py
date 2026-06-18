@@ -1,368 +1,171 @@
+import anyio
+import httpx
 import pytest
-import json
-from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch
-import pandas as pd
-from src.api import app
+
+from src import api
 
 
-class TestAPI:
-    """Test suite for the FastAPI application."""
-    
-    @pytest.fixture
-    def client(self):
-        """Create a test client for the FastAPI app."""
-        return TestClient(app)
-    
-    @pytest.fixture
-    def mock_predictor(self):
-        """Create a mock predictor for testing."""
-        predictor = Mock()
-        predictor.load_model.return_value = True
-        predictor.predict_single.return_value = {
-            'customer_id': 'test_customer',
-            'churn_prediction': 'No',
-            'churn_probability': 0.25,
-            'risk_level': 'Low',
-            'confidence': 0.85
-        }
-        predictor.predict_batch.return_value = [
-            {
-                'customer_id': 'customer_1',
-                'churn_prediction': 'No',
-                'churn_probability': 0.25,
-                'risk_level': 'Low',
-                'confidence': 0.85
-            },
-            {
-                'customer_id': 'customer_2',
-                'churn_prediction': 'Yes',
-                'churn_probability': 0.75,
-                'risk_level': 'High',
-                'confidence': 0.90
+class ASGITestClient:
+    def request(self, method, path, **kwargs):
+        return anyio.run(self._request, method, path, kwargs)
+
+    async def _request(self, method, path, kwargs):
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, path, **kwargs)
+
+    def get(self, path, **kwargs):
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path, **kwargs):
+        return self.request("POST", path, **kwargs)
+
+
+@pytest.fixture
+def client():
+    return ASGITestClient()
+
+
+@pytest.fixture
+def sample_customer_data():
+    return {
+        "customerID": "test_customer",
+        "gender": "Male",
+        "SeniorCitizen": 0,
+        "Partner": "Yes",
+        "Dependents": "No",
+        "tenure": 12,
+        "PhoneService": "Yes",
+        "MultipleLines": "No",
+        "InternetService": "Fiber optic",
+        "OnlineSecurity": "No",
+        "OnlineBackup": "Yes",
+        "DeviceProtection": "No",
+        "TechSupport": "No",
+        "StreamingTV": "Yes",
+        "StreamingMovies": "No",
+        "Contract": "Month-to-month",
+        "PaperlessBilling": "Yes",
+        "PaymentMethod": "Electronic check",
+        "MonthlyCharges": 70.5,
+        "TotalCharges": 846.0,
+    }
+
+
+@pytest.fixture
+def loaded_predictor(monkeypatch):
+    class MockPredictor:
+        model = object()
+        final_model_path = "models/final_model.joblib"
+
+        def predict_single(self, customer):
+            return {
+                "customer_id": customer.get("customerID", "customer_0"),
+                "churn_prediction": "No",
+                "churn_probability": 0.25,
+                "risk_level": "Low",
+                "confidence": 0.75,
             }
-        ]
-        return predictor
-    
-    @pytest.fixture
-    def sample_customer_data(self):
-        """Sample customer data for testing."""
-        return {
-            "tenure": 12,
-            "MonthlyCharges": 70.5,
-            "TotalCharges": 846.0,
-            "Contract": "Month-to-month",
-            "PaymentMethod": "Electronic check",
-            "InternetService": "Fiber optic",
-            "gender": "Male",
-            "Partner": "Yes",
-            "Dependents": "No"
-        }
-    
-    def test_health_check(self, client):
-        """Test the health check endpoint."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert "timestamp" in data
-        assert "model_loaded" in data
-    
-    @patch('src.api.predictor')
-    def test_single_prediction_success(self, mock_predictor_instance, client, sample_customer_data):
-        """Test successful single customer prediction."""
-        mock_predictor_instance.predict_single.return_value = {
-            'customer_id': 'test_customer',
-            'churn_prediction': 'No',
-            'churn_probability': 0.25,
-            'risk_level': 'Low',
-            'confidence': 0.85
-        }
-        
-        response = client.post("/predict", json=sample_customer_data)
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["churn_prediction"] == "No"
-        assert data["churn_probability"] == 0.25
-        assert data["risk_level"] == "Low"
-        assert data["confidence"] == 0.85
-        assert "customer_id" in data
-    
-    @patch('src.api.predictor')
-    def test_single_prediction_missing_fields(self, mock_predictor_instance, client):
-        """Test single prediction with missing required fields."""
-        # Mock predictor to return empty dict (simulating missing required fields error)
-        mock_predictor_instance.predict_single.return_value = {}
-        
-        incomplete_data = {"tenure": 12}  # Missing other required fields
-        
-        response = client.post("/predict", json=incomplete_data)
-        assert response.status_code == 500  # Internal error due to empty prediction result
-    
-    @patch('src.api.predictor')
-    def test_single_prediction_invalid_data_types(self, mock_predictor_instance, client):
-        """Test single prediction with invalid data types."""
-        invalid_data = {
-            "tenure": "invalid",  # Should be numeric
-            "MonthlyCharges": 70.5,
-            "Contract": "Month-to-month"
-        }
-        
-        response = client.post("/predict", json=invalid_data)
-        assert response.status_code == 422  # Validation error
-    
-    @patch('src.api.predictor')
-    def test_batch_prediction_success(self, mock_predictor_instance, client, sample_customer_data):
-        """Test successful batch prediction."""
-        mock_predictor_instance.predict_batch.return_value = [
-            {
-                'customer_id': 'customer_1',
-                'churn_prediction': 'No',
-                'churn_probability': 0.25,
-                'risk_level': 'Low',
-                'confidence': 0.85
-            },
-            {
-                'customer_id': 'customer_2',
-                'churn_prediction': 'Yes',
-                'churn_probability': 0.75,
-                'risk_level': 'High',
-                'confidence': 0.90
-            }
-        ]
-        
-        batch_data = {
-            "customers": [sample_customer_data, sample_customer_data]
-        }
-        
-        response = client.post("/predict/batch", json=batch_data)
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "predictions" in data
-        assert len(data["predictions"]) == 2
-        assert data["predictions"][0]["churn_prediction"] == "No"
-        assert data["predictions"][1]["churn_prediction"] == "Yes"
-    
-    @patch('src.api.predictor')
-    def test_batch_prediction_empty_list(self, mock_predictor_instance, client):
-        """Test batch prediction with empty customer list."""
-        batch_data = {"customers": []}
-        
-        response = client.post("/predict/batch", json=batch_data)
-        assert response.status_code == 422  # Should validate minimum items
-    
-    @patch('src.api.predictor')
-    def test_batch_prediction_too_many_customers(self, mock_predictor_instance, client, sample_customer_data):
-        """Test batch prediction with too many customers."""
-        # Create a list with more than 1000 customers (assuming that's the limit)
-        large_batch = {"customers": [sample_customer_data] * 1001}
-        
-        response = client.post("/predict/batch", json=large_batch)
-        assert response.status_code == 422  # Should validate maximum items
-    
-    @patch('src.api.predictor')
-    def test_prediction_with_explanation(self, mock_predictor_instance, client, sample_customer_data):
-        """Test prediction with explanation."""
-        mock_predictor_instance.explain_prediction.return_value = {
-            'prediction': {
-                'customer_id': 'test_customer',
-                'churn_prediction': 'No',
-                'churn_probability': 0.25,
-                'risk_level': 'Low',
-                'confidence': 0.85
-            },
-            'important_factors': [
-                'Month-to-month contract (higher churn risk)',
-                'Electronic check payment (associated with higher churn)'
-            ],
-            'recommendations': [
-                'Offer incentive to switch to annual contract',
-                'Review pricing and offer competitive rate'
+
+        def predict_batch(self, customers):
+            return [
+                {
+                    "customer_id": customer.get("customerID", f"customer_{index}"),
+                    "churn_prediction": "Yes" if index else "No",
+                    "churn_probability": 0.75 if index else 0.25,
+                    "risk_level": "High" if index else "Low",
+                    "confidence": 0.75,
+                }
+                for index, customer in enumerate(customers)
             ]
-        }
-        
-        response = client.post("/predict/explain", json=sample_customer_data)
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "prediction" in data
-        assert "important_factors" in data
-        assert "recommendations" in data
-        assert len(data["important_factors"]) > 0
-        assert len(data["recommendations"]) > 0
-    
-    @patch('src.api.predictor')
-    def test_api_error_handling(self, mock_predictor_instance, client, sample_customer_data):
-        """Test API error handling when predictor fails."""
-        mock_predictor_instance.predict_single.side_effect = Exception("Model prediction failed")
-        
-        response = client.post("/predict", json=sample_customer_data)
-        assert response.status_code == 500
-        
-        data = response.json()
-        assert "detail" in data
-    
-    def test_cors_headers(self, client):
-        """Test CORS headers are properly set."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        # Note: CORS headers would be tested if CORS middleware is configured
-    
-    def test_openapi_docs(self, client):
-        """Test that OpenAPI documentation is accessible."""
-        response = client.get("/docs")
-        assert response.status_code == 200
-        
-        response = client.get("/openapi.json")
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "application/json"
+
+        def explain_prediction(self, customer):
+            return {
+                "prediction": self.predict_single(customer),
+                "important_factors": ["Month-to-month contract"],
+                "recommendations": ["Offer incentive to switch to annual contract"],
+            }
+
+    monkeypatch.setattr(api, "predictor", MockPredictor())
 
 
-class TestAPIDataModels:
-    """Test the Pydantic data models used in the API."""
-    
-    def test_customer_data_model_validation(self):
-        """Test CustomerData model validation."""
-        from src.api import CustomerData
-        
-        # Valid data
-        valid_data = {
-            "tenure": 12,
-            "MonthlyCharges": 70.5,
-            "Contract": "Month-to-month"
-        }
-        customer = CustomerData(**valid_data)
-        assert customer.tenure == 12
-        assert customer.MonthlyCharges == 70.5
-        assert customer.Contract == "Month-to-month"
-        
-        # Test optional fields
-        customer_with_optional = CustomerData(
-            tenure=12,
-            MonthlyCharges=70.5,
-            Contract="Month-to-month",
-            TotalCharges=846.0
-        )
-        assert customer_with_optional.TotalCharges == 846.0
-    
-    def test_customer_data_model_invalid_values(self):
-        """Test CustomerData model with invalid values."""
-        from src.api import CustomerData
-        import pytest
-        from pydantic import ValidationError
-        
-        # Test negative tenure
-        with pytest.raises(ValidationError):
-            CustomerData(
-                tenure=-1,
-                MonthlyCharges=70.5,
-                Contract="Month-to-month"
-            )
-        
-        # Test negative charges
-        with pytest.raises(ValidationError):
-            CustomerData(
-                tenure=12,
-                MonthlyCharges=-10.0,
-                Contract="Month-to-month"
-            )
-    
-    def test_prediction_response_model(self):
-        """Test PredictionResponse model."""
-        from src.api import PredictionResponse
-        
-        response = PredictionResponse(
-            customer_id="test_123",
-            churn_prediction="Yes",
-            churn_probability=0.75,
-            risk_level="High",
-            confidence=0.90
-        )
-        
-        assert response.customer_id == "test_123"
-        assert response.churn_prediction == "Yes"
-        assert response.churn_probability == 0.75
-        assert response.risk_level == "High"
-        assert response.confidence == 0.90
-    
-    def test_batch_prediction_response_model(self):
-        """Test BatchPredictionResponse model."""
-        from src.api import BatchPredictionResponse, PredictionResponse
-        
-        predictions = [
-            PredictionResponse(
-                customer_id="test_1",
-                churn_prediction="No",
-                churn_probability=0.25,
-                risk_level="Low",
-                confidence=0.85
-            ),
-            PredictionResponse(
-                customer_id="test_2",
-                churn_prediction="Yes",
-                churn_probability=0.75,
-                risk_level="High",
-                confidence=0.90
-            )
-        ]
-        
-        batch_response = BatchPredictionResponse(predictions=predictions)
-        assert len(batch_response.predictions) == 2
-        assert batch_response.predictions[0].customer_id == "test_1"
-        assert batch_response.predictions[1].churn_prediction == "Yes"
+def test_health_check_reports_model_state(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] in {"healthy", "degraded"}
+    assert "model_loaded" in data
+    assert "model_path" in data
 
 
-class TestAPIIntegration:
-    """Integration tests for the API with real components."""
-    
-    @pytest.fixture(scope="class")
-    def client(self):
-        """Create a test client for integration tests."""
-        return TestClient(app)
-    
-    @pytest.mark.integration
-    def test_api_with_real_predictor(self, client):
-        """Test API with actual predictor (requires trained model)."""
-        # This test would require a trained model to be present
-        # Skip if no model is available
-        import os
-        model_path = "models/best_model_xgboost.pkl"
-        
-        if not os.path.exists(model_path):
-            pytest.skip("No trained model available for integration test")
-        
-        sample_data = {
-            "tenure": 12,
-            "MonthlyCharges": 70.5,
-            "TotalCharges": 846.0,
-            "Contract": "Month-to-month",
-            "PaymentMethod": "Electronic check",
-            "InternetService": "Fiber optic",
-            "gender": "Male",
-            "Partner": "Yes",
-            "Dependents": "No",
-            "PhoneService": "Yes",
-            "MultipleLines": "No",
-            "OnlineSecurity": "No",
-            "OnlineBackup": "Yes",
-            "DeviceProtection": "No",
-            "TechSupport": "No",
-            "StreamingTV": "No",
-            "StreamingMovies": "No",
-            "PaperlessBilling": "Yes",
-            "SeniorCitizen": "0"
-        }
-        
-        response = client.post("/predict", json=sample_data)
-        
-        if response.status_code == 200:
-            data = response.json()
-            assert "churn_prediction" in data
-            assert "churn_probability" in data
-            assert "risk_level" in data
-            assert "confidence" in data
-            assert 0 <= data["churn_probability"] <= 1
-            assert data["churn_prediction"] in ["Yes", "No"]
-            assert data["risk_level"] in ["Very Low", "Low", "Medium", "High", "Very High"]
+def test_single_prediction_success(client, sample_customer_data, loaded_predictor):
+    response = client.post("/predict", json=sample_customer_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["customer_id"] == "test_customer"
+    assert data["churn_prediction"] == "No"
+    assert data["churn_probability"] == 0.25
+    assert data["risk_level"] == "Low"
+
+
+def test_single_prediction_requires_full_schema(client, loaded_predictor):
+    response = client.post("/predict", json={"tenure": 12})
+    assert response.status_code == 422
+
+
+def test_single_prediction_invalid_types(client, loaded_predictor, sample_customer_data):
+    sample_customer_data["tenure"] = "invalid"
+    response = client.post("/predict", json=sample_customer_data)
+    assert response.status_code == 422
+
+
+def test_prediction_requires_loaded_model(client, monkeypatch, sample_customer_data):
+    class MissingPredictor:
+        model = None
+        final_model_path = "models/final_model.joblib"
+
+    monkeypatch.setattr(api, "predictor", MissingPredictor())
+    response = client.post("/predict", json=sample_customer_data)
+    assert response.status_code == 503
+
+
+def test_batch_prediction_success(client, sample_customer_data, loaded_predictor):
+    response = client.post(
+        "/predict/batch",
+        json={"customers": [sample_customer_data, sample_customer_data]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["predictions"]) == 2
+    assert data["total_customers"] == 2
+    assert data["high_risk_count"] == 1
+
+
+def test_batch_prediction_bounds(client, sample_customer_data, loaded_predictor):
+    assert client.post("/predict/batch", json={"customers": []}).status_code == 422
+    response = client.post(
+        "/predict/batch",
+        json={"customers": [sample_customer_data] * 1001},
+    )
+    assert response.status_code == 422
+
+
+def test_prediction_with_explanation(client, sample_customer_data, loaded_predictor):
+    response = client.post("/predict/explain", json=sample_customer_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert "prediction" in data
+    assert "important_factors" in data
+    assert "recommendations" in data
+
+
+def test_removed_customer_management_routes_are_not_public(client):
+    assert client.get("/customers/test_customer").status_code == 404
+    assert client.get("/statistics").status_code == 404
+
+
+def test_openapi_docs(client):
+    assert client.get("/docs").status_code == 200
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"

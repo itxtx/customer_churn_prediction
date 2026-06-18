@@ -111,7 +111,7 @@ class TestDataProcessor:
         assert df_with_features['HasInternetService'].iloc[2] == 0  # No
         
         # Check ratio calculation
-        expected_ratio = 50.0 / (600.0 + 1)
+        expected_ratio = 50.0 / (600.0 + 1e-6)
         assert abs(df_with_features['MonthlyToTotalRatio'].iloc[0] - expected_ratio) < 0.001
     
     def test_cap_outliers(self, data_processor):

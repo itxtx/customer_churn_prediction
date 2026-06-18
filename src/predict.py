@@ -27,6 +27,10 @@ class ChurnPredictor:
             self.config = yaml.safe_load(file)
         
         self.models_dir = self.config['models']['output_dir']
+        self.final_model_path = self.config['models'].get(
+            'final_model_path',
+            os.path.join(self.models_dir, 'final_model.joblib')
+        )
         self.data_processor = DataProcessor(config_path)
         self.model = None
         self.model_name = None
@@ -43,12 +47,11 @@ class ChurnPredictor:
         """
         try:
             if model_path is None:
-                # Use the xgboost model by default
-                model_path = os.path.join(self.models_dir, 'xgboost_model.pkl')
-                self.model_name = 'xgboost'
-                
+                model_path = self.final_model_path
+                self.model_name = os.path.splitext(os.path.basename(model_path))[0]
+
                 if not os.path.exists(model_path):
-                    logger.error(f"XGBoost model not found at {model_path}")
+                    logger.error(f"Final model not found at {model_path}")
                     return False
             
             self.model = joblib.load(model_path)
@@ -156,7 +159,9 @@ class ChurnPredictor:
         choices = ['Very High', 'High', 'Medium', 'Low']
         results_df['risk_level'] = np.select(conditions, choices, default='Very Low')
         
-        results_df['churn_prediction'] = pd.Series(predictions, index=df.index).map({0: 'No', 1: 'Yes'})
+        results_df['churn_prediction'] = [
+            self._format_prediction_label(value) for value in predictions
+        ]
         
         # Log a summary
         churn_count = (results_df['churn_prediction'] == 'Yes').sum()
@@ -176,6 +181,14 @@ class ChurnPredictor:
         elif probability >= 0.4: return 'Medium'
         elif probability >= 0.2: return 'Low'
         else: return 'Very Low'
+
+    def _format_prediction_label(self, value: Any) -> str:
+        """Normalize model class labels into the API's Yes/No response shape."""
+        if value in (1, '1', True, 'Yes'):
+            return 'Yes'
+        if value in (0, '0', False, 'No'):
+            return 'No'
+        return str(value)
 
     
     def explain_prediction(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
