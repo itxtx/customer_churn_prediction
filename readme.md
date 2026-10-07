@@ -1,15 +1,6 @@
 # Telecom Customer Churn Prediction
 
-An end-to-end machine learning portfolio project for predicting telecom customer churn. The project focuses on a reproducible train/evaluate/predict workflow, a small FastAPI serving layer, and simulation utilities for business impact analysis.
 
-## What This Project Shows
-
-- Reproducible data preparation and feature engineering for the Telco churn dataset
-- Model comparison across logistic regression, random forest, gradient boosting, and XGBoost
-- A saved final pipeline artifact for repeatable predictions
-- FastAPI endpoints for single, batch, and explained churn predictions
-- Monte Carlo-style simulation utilities for scenario and revenue-impact analysis
-- Tests and CI smoke checks for the core workflow
 
 ## Project Structure
 
